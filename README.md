@@ -40,55 +40,29 @@ Official background:
 python -m pip install -r requirements.txt
 ```
 
-## Usage
-
-The HYSYS-specific automation should be wrapped by an `evaluate_fn`. That adapter is responsible for writing the decision variables, running the solver, checking convergence, reading the requested outputs, and raising `SimulationConvergenceError` when the model does not converge.
+## Example
 
 ```python
-from recovery_strategy import (
-    SimulationConvergenceError,
-    evaluate_with_recovery,
+from recovery_strategy import run_with_recovery
+
+point = {
+    "x1": 1.0,
+    "x2": 2.0,
+    "x3": 3.0,
+    "x4": 4.0,
+    "x5": 5.0,
+    "x6": 6.0,
+    "x7": 7.0,
+    "x8": 8.0,
+    "x9": 9.0,
+}
+
+result = run_with_recovery(
+    point=point,
+    run_simulation=simulate_hysys,
+    variables_to_perturb=["x2", "x7"],
+    perturbation=0.20,
 )
-
-
-def evaluate_hysys(point):
-    # 1. Write the decision variables through the HYSYS automation interface.
-    # 2. Run/check the steady-state calculation.
-    # 3. Raise SimulationConvergenceError if the case does not converge.
-    # 4. Return only the outputs required by the data-generation workflow.
-    raise NotImplementedError
-
-
-result = evaluate_with_recovery(
-    point=[1.0, 2.0, 3.0],
-    evaluate_fn=evaluate_hysys,
-    variable_indices=[0, 2],
-    recovery_factor=1.20,
-    max_attempts=2,
-)
 ```
 
-With `max_attempts=2`, the call sequence is:
-
-```text
-original point -> recovery point -> original point
-```
-
-If the first original attempt succeeds, no recovery point is evaluated.
-
-## Run the tests
-
-The tests use Python's standard-library test runner and a fake simulator, so Aspen HYSYS is not required.
-
-```bash
-python -m unittest discover -s tests -v
-```
-
-## Limitations
-
-- This is a targeted recovery heuristic, not a universal convergence algorithm.
-- The influential variables and perturbation factor must be justified for each flowsheet.
-- Perturbations must remain inside physically meaningful and permitted operating bounds.
-- Unexpected automation or programming errors are not treated as convergence failures.
-- Production workflows should log every failed attempt and define a separate policy for unrecoverable samples.
-- Aspen HYSYS is a commercial product of Aspen Technology, Inc. This repository is an independent example and is not affiliated with or endorsed by AspenTech.
+Here, `perturbation=0.20` temporarily increases `x2` and `x7` by 20%. The auxiliary result is discarded. The function then restores and evaluates the exact original point again.
