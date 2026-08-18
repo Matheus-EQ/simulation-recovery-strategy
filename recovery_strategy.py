@@ -1,84 +1,42 @@
-"""Generic recovery logic for stateful external process simulations."""
-
-from collections.abc import Callable, Sequence
-from typing import TypeVar
-
-import numpy as np
-from numpy.typing import NDArray
+"""Simple recovery strategy for external simulations."""
 
 
-ResultT = TypeVar("ResultT")
+def run_with_recovery(
+    point,
+    run_simulation,
+    variables_to_perturb,
+    perturbation=0.20,
+):
+    """Retry a failed point after running a temporary perturbed point."""
+    original_point = point.copy()
 
+    try:
+        result = run_simulation(original_point.copy())
+    except Exception:
+        result = None
 
-class SimulationConvergenceError(RuntimeError):
-    """Signal that an external simulator did not converge for an input point."""
+    if result is not None:
+        return result
 
+    print("The original point did not converge. Applying the recovery strategy...")
 
-def perturb_point(
-    point: Sequence[float],
-    variable_indices: Sequence[int],
-    factor: float = 1.20,
-) -> NDArray[np.float64]:
-    """Return a copy with selected decision variables multiplied by ``factor``."""
-    if not np.isfinite(factor) or factor <= 0:
-        raise ValueError("factor must be a finite number greater than zero")
+    recovery_point = original_point.copy()
+    for variable in variables_to_perturb:
+        recovery_point[variable] *= 1 + perturbation
 
-    perturbed = np.asarray(point, dtype=float).copy()
-    if perturbed.ndim != 1:
-        raise ValueError("point must be a one-dimensional sequence")
+    # The auxiliary result is intentionally discarded.
+    try:
+        run_simulation(recovery_point)
+    except Exception:
+        print("The auxiliary point did not converge. Retrying the original point anyway...")
 
-    indices = tuple(variable_indices)
-    if len(set(indices)) != len(indices):
-        raise ValueError("variable_indices must not contain duplicates")
+    print("Restoring and retrying the exact original point...")
+    try:
+        result = run_simulation(original_point.copy())
+    except Exception:
+        result = None
 
-    for index in indices:
-        if not isinstance(index, (int, np.integer)):
-            raise TypeError("variable_indices must contain integers")
-        if index < 0 or index >= perturbed.size:
-            raise IndexError(f"variable index out of range: {index}")
-        perturbed[index] *= factor
+    if result is None:
+        print("The original point did not converge after the recovery attempt.")
 
-    return perturbed
-
-
-def evaluate_with_recovery(
-    point: Sequence[float],
-    evaluate_fn: Callable[[NDArray[np.float64]], ResultT],
-    variable_indices: Sequence[int],
-    recovery_factor: float = 1.20,
-    max_attempts: int = 2,
-) -> ResultT:
-    """Evaluate a target point, using auxiliary perturbed runs after failures.
-
-    Only :class:`SimulationConvergenceError` triggers the recovery sequence.
-    The auxiliary recovery result is discarded; a successful return always belongs
-    to the exact target point supplied by the caller.
-    """
-    if max_attempts < 1:
-        raise ValueError("max_attempts must be at least 1")
-
-    target_point = np.asarray(point, dtype=float).copy()
-    recovery_point = perturb_point(
-        target_point,
-        variable_indices,
-        factor=recovery_factor,
-    )
-    last_error: SimulationConvergenceError | None = None
-
-    for attempt in range(max_attempts):
-        try:
-            return evaluate_fn(target_point.copy())
-        except SimulationConvergenceError as exc:
-            last_error = exc
-
-        if attempt < max_attempts - 1:
-            try:
-                evaluate_fn(recovery_point.copy())
-            except SimulationConvergenceError:
-                # The target is still retried because the auxiliary evaluation may
-                # have changed the external simulator's internal numerical state.
-                continue
-
-    raise SimulationConvergenceError(
-        "Target point failed after the configured recovery attempts."
-    ) from last_error
+    return result
